@@ -1,0 +1,8 @@
+vpc_cidr_block      = "10.0.0.0/16"
+subnet_cidr_block   = "10.0.10.0/24"
+avail_zone          = "ap-northeast-2a"
+env_prefix          = "dev"
+ami_zabbix          = "ami-0662f4965dfc70aca"
+inst_type_zabbix    = "t2.micro"
+private_ip          = "10.0.10.165"
+public_key_location = "id_ed25519.pub"

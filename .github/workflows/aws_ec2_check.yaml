@@ -1,0 +1,84 @@
+name: Check EC2 and Notify Teams
+
+on:
+#  workflow_dispatch:
+  schedule:
+    - cron: '0 13 * * *'  # Runs every hour
+jobs:
+  check-ec2:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2  # Change if needed
+
+      - name: Check for running EC2 instances in all regions
+        id: ec2
+        run: |
+          REGIONS="us-east-2 ap-south-1 ap-northeast-2"
+          RUNNING_INSTANCES=""
+          
+
+          for region in $REGIONS; do
+            REGION_OUTPUT=$(aws ec2 describe-instances \
+              --region "$region" \
+              --filters "Name=instance-state-name,Values=running" \
+              --query "Reservations[].Instances[].[Tags[?Key=='Name']|[0].Value]" \
+              --output text)
+          
+          if [ -n "$REGION_OUTPUT" ]; then
+            MESSAGE+="\n$region:\n"
+            while IFS= read -r line; do
+              MESSAGE+="$line\n"
+            done <<< "$REGION_OUTPUT"
+          fi
+          done
+          
+          if [ -z "$MESSAGE" ]; then
+            echo "No running instances."
+            echo "send_notification=false" >> $GITHUB_OUTPUT
+          else
+            CLEANED=$(echo -e "$MESSAGE" | sed ':a;N;$!ba;s/\n/\\n/g')
+            echo -e "Final Message:\n$MESSAGE"
+            echo "send_notification=true" >> $GITHUB_OUTPUT
+            echo "running_instances=$CLEANED" >> $GITHUB_OUTPUT
+          fi
+      
+
+      - name: Send Teams Notification
+        if: steps.ec2.outputs.send_notification == 'true'
+        run: |
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d '{
+              "type": "message",
+              "attachments": [
+                {
+                  "contentType": "application/vnd.microsoft.card.adaptive",
+                  "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.3",
+                    "body": [
+                      {
+                        "type": "TextBlock",
+                        "text": "🚨 EC2 instance(s) are running!",
+                        "size": "Large",
+                        "weight": "Bolder",
+                        "color": "Attention"
+                      },
+                      {
+                        "type": "TextBlock",
+                        "text": "${{ steps.ec2.outputs.running_instances }}",
+                        "wrap": true
+                      }
+                    ]
+                  }
+                }
+              ]
+            }' \
+            "${{ secrets.TEAMS_WEBHOOK_URL }}"
